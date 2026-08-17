@@ -153,7 +153,8 @@ def is_success(payload: dict) -> bool:
 
 def handle_webhook(payload: dict) -> dict:
     _ensure_tables()
-
+    if DEBUG:
+        print("[CHARGILY][DEBUG] Payload reçu :", json.dumps(payload, ensure_ascii=False)[:2000], flush=True)
     event_id = str(
         payload.get("id")
         or payload.get("event_id")
@@ -188,8 +189,11 @@ def handle_webhook(payload: dict) -> dict:
     try:
         import mailer
         print(f"[MAIL] Tentative d'envoi à {email}...", flush=True)
-        mailer.send_license_email(email, key, plan)
-        print(f"[MAIL] ✅ E-mail envoyé avec succès !", flush=True)
+        ok = mailer.send_license_email(email, key, plan)
+        if ok:
+            print(f"[MAIL] ✅ E-mail envoyé avec succès à {email}", flush=True)
+        else:
+            print(f"[MAIL] ⚠️ Envoi ignoré (SMTP non configuré ou échec)", flush=True)
     except Exception as exc:
         print(f"[MAIL] ❌ ERREUR MAILER : {exc}", flush=True)
 
