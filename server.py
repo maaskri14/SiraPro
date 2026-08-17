@@ -63,6 +63,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        if self.path == "/api/admin/license":  # ADMIN:route
+            self._handle_admin_license()
+            return
         if self.path == "/api/register_intent":  # PAYCAP:route
             self._handle_register_intent()
             return
@@ -264,6 +267,38 @@ class AppHandler(SimpleHTTPRequestHandler):
             db.execute("INSERT INTO payment_intents (email, plan) VALUES (?, ?)", (email, plan))
         print(f"[INTENT] E-mail enregistré avant paiement : {email} ({plan})", flush=True)
         self._send_json({"status": "ok"})
+
+
+    def _handle_admin_license(self) -> None:  # ADMIN:method
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except Exception:
+            self._send_json({"error": "invalid_json"}, 400)
+            return
+        import hmac as _hmac
+        expected = os.getenv("CV_ADMIN_SECRET") or os.getenv("CV_LICENSE_SECRET") or ""
+        secret = str(payload.get("secret", ""))
+        if not expected or not _hmac.compare_digest(expected, secret):
+            self._send_json({"error": "forbidden"}, 403)
+            return
+        email = str(payload.get("email", "")).strip().lower()
+        plan = payload.get("plan") if payload.get("plan") in ("monthly", "annual") else "monthly"
+        if "@" not in email:
+            self._send_json({"error": "invalid_email"}, 400)
+            return
+        import licensing
+        days = 31 if plan == "monthly" else 366
+        key = licensing.create_license(email, plan, days, provider="admin", provider_ref="manual")
+        sent = False
+        if payload.get("send_email", True):
+            try:
+                import mailer
+                sent = bool(mailer.send_license_email(email, key, plan))
+            except Exception as exc:
+                print(f"[MAIL] Erreur : {exc}", flush=True)
+        print(f"[ADMIN] Licence manuelle pour {email} ({plan})", flush=True)
+        self._send_json({"status": "license_created", "key": key, "email": email, "plan": plan, "email_sent": sent})
 
     def _handle_chargily_webhook(self) -> None:
         try:
