@@ -1,0 +1,426 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from licensing import connect, create_license
+
+
+PADDLE_WEBHOOK_SECRET = os.getenv("CV_PADDLE_WEBHOOK_SECRET", "")
+
+PADDLE_MONTHLY_PRICE_ID = os.getenv(
+    "CV_PADDLE_PRICE_MONTHLY",
+    "pri_01kzknvgbrggy0fyh52x60x516"
+)
+
+PADDLE_ANNUAL_PRICE_ID = os.getenv(
+    "CV_PADDLE_PRICE_ANNUAL",
+    "pri_01kzknx5nrsjte790mp4fefkjm"
+)
+
+DEBUG = os.getenv("CV_PADDLE_DEBUG", "") == "1"
+
+
+def verify_paddle_signature(
+    raw_body: bytes,
+    signature_header: str,
+    secret: Optional[str] = None
+) -> bool:
+    """
+    Vérifie la signature envoyée par Paddle dans le header :
+    Paddle-Signature: ts=...;h=...
+    """
+
+    secret = secret or PADDLE_WEBHOOK_SECRET
+
+    if not raw_body or not signature_header or not secret:
+        return False
+
+    parts = {}
+
+    for chunk in signature_header.split(";"):
+        if "=" in chunk:
+            key, value = chunk.split("=", 1)
+            parts[key.strip()] = value.strip()
+
+    ts = parts.get("ts")
+    received = parts.get("h")
+
+    if not ts or not received:
+        return False
+
+    # Protection simple contre les webhooks très anciens.
+    try:
+        if abs(time.time() - int(ts)) > 86400:
+            return False
+    except ValueError:
+        pass
+
+    signed_payload = ts.encode("utf-8") + b":" + raw_body
+
+    digest = hmac.new(
+        secret.encode("utf-8"),
+        signed_payload,
+        hashlib.sha256
+    )
+
+    expected_hex = digest.hexdigest()
+    expected_base64 = base64.b64encode(digest.digest()).decode("utf-8")
+
+    return (
+        hmac.compare_digest(expected_hex, received)
+        or hmac.compare_digest(expected_base64, received)
+    )
+
+
+def _ensure_tables(db) -> None:
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS paddle_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT,
+            email TEXT,
+            plan TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS paddle_subscriptions (
+            subscription_id TEXT PRIMARY KEY,
+            email TEXT,
+            plan TEXT,
+            status TEXT,
+            updated_at TEXT
+        );
+        """
+    )
+
+
+def _event_id_from_payload(payload: dict[str, Any]) -> str:
+    event_id = (
+        payload.get("event_id")
+        or payload.get("notification_id")
+        or payload.get("id")
+    )
+
+    if event_id:
+        return str(event_id)
+
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _is_processed(event_id: str) -> bool:
+    with connect() as db:
+        _ensure_tables(db)
+
+        row = db.execute(
+            """
+            SELECT 1
+            FROM paddle_events
+            WHERE event_id = ?
+            """,
+            (event_id,)
+        ).fetchone()
+
+    return row is not None
+
+
+def _mark_processed(
+    event_id: str,
+    event_type: str,
+    email: Optional[str] = None,
+    plan: Optional[str] = None
+) -> None:
+    with connect() as db:
+        _ensure_tables(db)
+
+        db.execute(
+            """
+            INSERT OR IGNORE INTO paddle_events (
+                event_id,
+                event_type,
+                email,
+                plan
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                event_type,
+                email,
+                plan
+            )
+        )
+
+
+def _collect_price_ids(obj: Any, out: list[str]) -> None:
+    if isinstance(obj, dict):
+        price_id = obj.get("price_id")
+
+        if isinstance(price_id, str):
+            out.append(price_id)
+
+        price = obj.get("price")
+
+        if isinstance(price, dict):
+            pid = price.get("id")
+            if isinstance(pid, str):
+                out.append(pid)
+
+        for value in obj.values():
+            _collect_price_ids(value, out)
+
+    elif isinstance(obj, list):
+        for value in obj:
+            _collect_price_ids(value, out)
+
+
+def _collect_email(obj: Any) -> Optional[str]:
+    email_keys = {
+        "email",
+        "customer_email",
+        "billing_email"
+    }
+
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key.lower() in email_keys:
+                if isinstance(value, str) and "@" in value:
+                    return value.strip().lower()
+
+        for value in obj.values():
+            found = _collect_email(value)
+            if found:
+                return found
+
+    elif isinstance(obj, list):
+        for value in obj:
+            found = _collect_email(value)
+            if found:
+                return found
+
+    return None
+
+
+def extract_email(data: dict[str, Any]) -> Optional[str]:
+    return _collect_email(data)
+
+
+def extract_plan(data: dict[str, Any]) -> Optional[str]:
+    price_ids: list[str] = []
+    _collect_price_ids(data, price_ids)
+
+    for price_id in price_ids:
+        if price_id == PADDLE_ANNUAL_PRICE_ID:
+            return "annual"
+
+        if price_id == PADDLE_MONTHLY_PRICE_ID:
+            return "monthly"
+
+    custom_data = data.get("custom_data") or {}
+
+    if isinstance(custom_data, dict):
+        plan = custom_data.get("plan")
+
+        if plan in {"monthly", "annual"}:
+            return plan
+
+    return None
+
+
+def extract_subscription_id(data: dict[str, Any]) -> Optional[str]:
+    def walk(obj: Any) -> Optional[str]:
+        if isinstance(obj, dict):
+            subscription_id = obj.get("subscription_id")
+
+            if isinstance(subscription_id, str) and subscription_id:
+                return subscription_id
+
+            subscription = obj.get("subscription")
+
+            if isinstance(subscription, dict):
+                sub_id = subscription.get("id")
+                if isinstance(sub_id, str) and sub_id:
+                    return sub_id
+
+            for value in obj.values():
+                found = walk(value)
+                if found:
+                    return found
+
+        elif isinstance(obj, list):
+            for value in obj:
+                found = walk(value)
+                if found:
+                    return found
+
+        return None
+
+    return walk(data)
+
+
+def _find_license_by_provider_ref(provider_ref: str):
+    with connect() as db:
+        _ensure_tables(db)
+
+        row = db.execute(
+            """
+            SELECT id, email, plan, status, expires_at
+            FROM licenses
+            WHERE provider = 'paddle'
+              AND provider_ref = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (provider_ref,)
+        ).fetchone()
+
+    return row
+
+
+def _extend_license(license_id: int, plan: str, days: int) -> None:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT expires_at
+            FROM licenses
+            WHERE id = ?
+            """,
+            (license_id,)
+        ).fetchone()
+
+        if not row:
+            return
+
+        now = datetime.now(timezone.utc)
+
+        try:
+            current_expiry = datetime.fromisoformat(row["expires_at"])
+
+            if current_expiry.tzinfo is None:
+                current_expiry = current_expiry.replace(tzinfo=timezone.utc)
+
+        except Exception:
+            current_expiry = now
+
+        base = current_expiry if current_expiry > now else now
+        new_expiry = base + timedelta(days=days)
+
+        db.execute(
+            """
+            UPDATE licenses
+            SET status = 'active',
+                plan = ?,
+                expires_at = ?
+            WHERE id = ?
+            """,
+            (
+                plan,
+                new_expiry.isoformat(),
+                license_id
+            )
+        )
+
+
+def deliver_license(email: str, plan: str, key: str) -> None:
+    """
+    En production, cette fonction doit envoyer la licence par e-mail.
+
+    Pour le sandbox, on peut afficher la clé dans la console si
+    CV_PADDLE_DEBUG=1.
+    """
+
+    print(f"[PADDLE] Licence créée pour {email} ({plan})")
+
+    if DEBUG:
+        print(f"[PADDLE][DEBUG] Clé de licence : {key}")
+
+
+def handle_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(payload.get("event_type", ""))
+    data = payload.get("data") or {}
+
+    event_id = _event_id_from_payload(payload)
+
+    if _is_processed(event_id):
+        return {
+            "status": "duplicate"
+        }
+
+    # Pour l'instant, on crée/étend une licence uniquement
+    # lorsque la transaction est terminée.
+    if event_type != "transaction.completed":
+        _mark_processed(event_id, event_type)
+
+        return {
+            "status": "ignored_event",
+            "event_type": event_type
+        }
+
+    transaction_status = str(
+        data.get("status", "completed")
+    ).lower()
+
+    if transaction_status not in {"completed", "paid", "success"}:
+        _mark_processed(event_id, event_type)
+
+        return {
+            "status": "ignored_transaction_status",
+            "transaction_status": transaction_status
+        }
+
+    email = extract_email(data)
+    plan = extract_plan(data)
+
+    if not email or not plan:
+        _mark_processed(event_id, event_type)
+
+        return {
+            "status": "missing_email_or_plan"
+        }
+
+    subscription_id = extract_subscription_id(data)
+    transaction_id = str(data.get("id") or event_id)
+
+    # Si on a un subscription_id, on l'utilise comme référence.
+    # Cela permet d'étendre la même licence à chaque renouvellement.
+    provider_ref = subscription_id or transaction_id
+
+    days = 31 if plan == "monthly" else 366
+
+    existing = _find_license_by_provider_ref(provider_ref)
+
+    if existing:
+        _extend_license(existing["id"], plan, days)
+        _mark_processed(event_id, event_type, email=email, plan=plan)
+
+        return {
+            "status": "license_extended",
+            "email": email,
+            "plan": plan
+        }
+
+    key = create_license(
+        email,
+        plan,
+        days,
+        provider="paddle",
+        provider_ref=provider_ref
+    )
+
+    deliver_license(email, plan, key)
+
+    _mark_processed(event_id, event_type, email=email, plan=plan)
+
+    return {
+        "status": "license_created",
+        "email": email,
+        "plan": plan
+    }

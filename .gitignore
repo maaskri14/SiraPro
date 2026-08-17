@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+*.db
+*.db-journal
+*.bak*
+*.broken
+*.casse
+cloudflared.exe

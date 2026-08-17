@@ -1,0 +1,7 @@
+reportlab
+python-docx
+arabic-reshaper
+python-bidi
+pypdf
+pytesseract
+Pillow
