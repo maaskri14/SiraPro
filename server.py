@@ -290,7 +290,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     mimetypes.add_type("text/css", ".css")
     mimetypes.add_type("application/javascript", ".js")
-    server = ThreadingHTTPServer(("0.0.0.0", int(os.getenv("PORT", "8000")))  # DEPLOY:port, AppHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", int(os.getenv("PORT", "8000"))), AppHandler)  # DEPLOY:port
     print("=== SERVEUR SIRA PRO DÉMARRÉ ===")
     print(f"Seller ID : {os.getenv('CV_PADDLE_SELLER_ID', 'NON DÉFINI')}")
     print(f"Client token : {os.getenv('CV_PADDLE_CLIENT_TOKEN', 'NON DÉFINI')[:15]}...")
