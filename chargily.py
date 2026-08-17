@@ -24,15 +24,12 @@ SIGNATURE_HEADERS = (
 
 def verify_chargily_signature(raw_body: bytes, headers: Any, secret: Optional[str] = None) -> bool:
     secret = secret or WEBHOOK_SECRET
-
     if not secret:
-        print("[CHARGILY] Attention : aucun secret configuré, signature non vérifiée.")
+        print("[CHARGILY] Attention : aucun secret configuré, signature non vérifiée.", flush=True)
         return True
-
     digest = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256)
     expected_hex = digest.hexdigest()
     expected_b64 = base64.b64encode(digest.digest()).decode("utf-8")
-
     for header in SIGNATURE_HEADERS:
         sig = headers.get(header)
         if not sig:
@@ -61,13 +58,6 @@ def _ensure_tables() -> None:
             )
             """
         )
-
-
-def _is_processed(event_id: str) -> bool:
-    with connect() as db:
-        row = db.execute(
-            "SELECT 1 FROM chargily_events WHERE event_id = ?", (event_id,)
-        )
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS pending_payments (
@@ -77,6 +67,13 @@ def _is_processed(event_id: str) -> bool:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """
+        )
+
+
+def _is_processed(event_id: str) -> bool:
+    with connect() as db:
+        row = db.execute(
+            "SELECT 1 FROM chargily_events WHERE event_id = ?", (event_id,)
         ).fetchone()
     return row is not None
 
@@ -121,12 +118,10 @@ def _find_amounts(obj: Any, out: list) -> None:
 
 def extract_plan(payload: dict) -> Optional[str]:
     text = json.dumps(payload)
-
     if ANNUAL_LINK_ID and ANNUAL_LINK_ID in text:
         return "annual"
     if MONTHLY_LINK_ID and MONTHLY_LINK_ID in text:
         return "monthly"
-
     amounts: list = []
     _find_amounts(payload, amounts)
     for amount in amounts:
@@ -134,7 +129,6 @@ def extract_plan(payload: dict) -> Optional[str]:
             return "annual"
         if amount in (500, 50000):
             return "monthly"
-
     plan = payload.get("plan")
     if plan in ("monthly", "annual"):
         return plan
@@ -145,11 +139,8 @@ def is_success(payload: dict) -> bool:
     event_type = str(
         payload.get("type") or payload.get("event") or payload.get("event_type") or ""
     ).lower()
-    
-    # Accepte "payment.succeeded" ET "checkout.paid"
-    if "paid" in event_type or "succeeded" in event_type or "completed" in event_type:
+    if "paid" in event_type or "succeeded" in event_type or "completed" in event_type or "success" in event_type:
         return True
-
     text = json.dumps(payload).lower()
     return any(
         marker in text
@@ -165,8 +156,10 @@ def is_success(payload: dict) -> bool:
 
 def handle_webhook(payload: dict) -> dict:
     _ensure_tables()
+
     if DEBUG:
         print("[CHARGILY][DEBUG] Payload reçu :", json.dumps(payload, ensure_ascii=False)[:2000], flush=True)
+
     event_id = str(
         payload.get("id")
         or payload.get("event_id")
@@ -175,6 +168,7 @@ def handle_webhook(payload: dict) -> dict:
     )
 
     if _is_processed(event_id):
+        print(f"[CHARGILY] Event déjà traité : {event_id}", flush=True)
         return {"status": "duplicate"}
 
     event_type = str(payload.get("type") or payload.get("event") or "payment")
@@ -184,102 +178,40 @@ def handle_webhook(payload: dict) -> dict:
         return {"status": "ignored_not_success"}
 
     email = _find_email(payload)
-
-
     plan = extract_plan(payload)
 
-
-
     if not plan:
-
-
         _mark_processed(event_id, event_type)
-
-
         return {"status": "missing_plan"}
 
-
-
     if not email:
-
-
         checkout_id = str((payload.get("data") or {}).get("id") or event_id)
-
-
         with connect() as db:
-
-
             db.execute(
-
-
                 "INSERT OR IGNORE INTO pending_payments (checkout_id, plan) VALUES (?, ?)",
-
-
                 (checkout_id, plan),
-
-
             )
-
-
         print(f"[CHARGILY] Paiement {checkout_id} en attente d'e-mail ({plan})", flush=True)
-
-
         _mark_processed(event_id, event_type, plan=plan)
-
-
         return {"status": "pending_email", "checkout_id": checkout_id}
 
-
-
     days = 31 if plan == "monthly" else 366
-
-
     key = create_license(email, plan, days, provider="chargily", provider_ref=event_id)
 
-
-
     print(f"[CHARGILY] Licence créée pour {email} ({plan})", flush=True)
-
-
     if DEBUG:
-
-
         print(f"[CHARGILY][DEBUG] Clé de licence : {key}", flush=True)
 
-
-
     try:
-
-
         import mailer
-
-
         print(f"[MAIL] Tentative d'envoi à {email}...", flush=True)
-
-
         ok = mailer.send_license_email(email, key, plan)
-
-
         if ok:
-
-
             print(f"[MAIL] ✅ E-mail envoyé avec succès à {email}", flush=True)
-
-
         else:
-
-
             print(f"[MAIL] ⚠️ Envoi non effectué (SMTP non configuré)", flush=True)
-
-
     except Exception as exc:
-
-
         print(f"[MAIL] ❌ ERREUR MAILER : {exc}", flush=True)
 
-
-
     _mark_processed(event_id, event_type, email=email, plan=plan)
-
-
     return {"status": "license_created", "email": email, "plan": plan}
