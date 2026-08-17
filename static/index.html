@@ -16,6 +16,11 @@ box-shadow:0 6px 22px rgba(0,0,0,.28);letter-spacing:.3px}
 #contactFooter a{color:#7ee0c0;text-decoration:none;font-weight:700}
 #contactFooter a:hover{text-decoration:underline}
 </style>
+
+<style>
+/* TWEAK:injected */
+.bigScanWrap{background:linear-gradient(90deg,rgba(30,116,90,.28),rgba(124,58,237,.22))!important;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+</style>
 </head>
 <body>
 
@@ -208,6 +213,20 @@ document.addEventListener('click', function(ev){
   }
   ensure();
   setInterval(ensure, 1000);
+})();
+</script>
+
+<script>
+// TWEAK:injected
+(function(){
+  function fix(){
+    var f = document.getElementById('contactFooter');
+    if (f && f.innerHTML.indexOf('\u2764') !== -1) {
+      f.innerHTML = '📞 <a href="tel:+213698062802">+213 698 06 28 02</a> &nbsp;·&nbsp; ✉️ <a href="mailto:m_maaskri@esi.dz">m_maaskri@esi.dz</a><br><small>SiraPro © 2026 — Fait en Algérie 🇩</small>';
+    }
+  }
+  fix();
+  setInterval(fix, 1000);
 })();
 </script>
 </body></html>
