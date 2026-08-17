@@ -41,6 +41,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         return str(STATIC / relative)
 
     def do_GET(self) -> None:
+        if self.path.split("?")[0] == "/webhooks/chargily":
+            self._send_json({"status": "ok"}, 200)
+            return
+        if self.path.split("?")[0] == "/webhooks/chargily":
+            self._send_json({"status": "ok"}, 200)
+            return
         if self.path == "/health":
             self._send_json({"status": "ok"})
             return
