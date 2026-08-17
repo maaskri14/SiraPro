@@ -176,9 +176,25 @@ def handle_webhook(payload: dict) -> dict:
     email = _find_email(payload)
     plan = extract_plan(payload)
 
-    if not email or not plan:
-        _mark_processed(event_id, event_type)
-        return {"status": "missing_email_or_plan"}
+    if not plan:
+            _mark_processed(event_id, event_type)
+            return {"status": "missing_plan"}
+
+        if not email:
+            checkout_id = str((payload.get("data") or {}).get("id") or event_id)
+            with connect() as db:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS pending_payments ("
+                    "checkout_id TEXT PRIMARY KEY, plan TEXT, consumed INTEGER DEFAULT 0,"
+                    "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+                )
+                db.execute(
+                    "INSERT OR IGNORE INTO pending_payments (checkout_id, plan) VALUES (?, ?)",
+                    (checkout_id, plan),
+                )
+            print(f"[CHARGILY] Paiement {checkout_id} en attente d'e-mail ({plan})", flush=True)
+            _mark_processed(event_id, event_type, plan=plan)
+            return {"status": "pending_email", "checkout_id": checkout_id}
 
     days = 31 if plan == "monthly" else 366
 

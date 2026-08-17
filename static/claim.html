@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiraPro — Recevoir ma clé</title>
+<style>body{font-family:Segoe UI,Arial;margin:0;background:#f8fafc;color:#0f172a}
+.card{max-width:480px;margin:60px auto;background:#fff;border-radius:16px;padding:32px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+h1{font-size:22px;color:#1e745a}label{display:block;margin:14px 0 6px;font-weight:600}
+input{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font-size:15px;box-sizing:border-box}
+button{margin-top:18px;width:100%;padding:14px;background:#1e745a;color:#fff;border:0;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer}
+.msg{margin-top:14px;font-weight:600}.ok{color:#1e745a}.err{color:#dc2626}small{color:#64748b}</style></head>
+<body><div class="card">
+<h1>💳 J'ai payé — recevoir ma clé d'activation</h1>
+<label>Votre adresse e-mail</label>
+<input id="email" type="email" placeholder="vous@example.com">
+<label>Numéro du paiement</label>
+<input id="cid" placeholder="01m0869wf6...">
+<small>Ce numéro se trouve sur la page de confirmation Chargily, dans l'adresse du site, après « checkouts/ ».</small>
+<button onclick="claim()">Recevoir ma clé</button>
+<div id="msg" class="msg"></div>
+</div>
+<script>
+async function claim(){
+  const msg=document.getElementById('msg');
+  msg.textContent='Envoi...';msg.className='msg';
+  try{
+    const r=await fetch('/api/claim_license',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:document.getElementById('email').value,checkout_id:document.getElementById('cid').value.trim()})});
+    const j=await r.json();
+    if(r.ok){msg.textContent='✅ Votre clé a été envoyée par e-mail ! (vérifiez les spams)';msg.className='msg ok';}
+    else{msg.textContent='❌ '+(j.error==='payment_not_found'?'Paiement introuvable. Vérifiez le numéro ou contactez-nous.':'Erreur : '+j.error);msg.className='msg err';}
+  }catch(e){msg.textContent='❌ Erreur réseau : '+e;msg.className='msg err';}
+}
+</script></body></html>

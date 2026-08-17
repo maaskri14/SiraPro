@@ -63,6 +63,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        if self.path == "/api/claim_license":  # CLAIM:route
+            self._handle_claim_license()
+            return
         path = urlparse(self.path).path
 
         if path == "/api/license/activate":
@@ -204,6 +207,37 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json({"error": "invalid_webhook"}, 400)
 
     # CHARGILY-WEBHOOK:method
+
+    def _handle_claim_license(self) -> None:  # CLAIM:method
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except Exception:
+            self._send_json({"error": "invalid_json"}, 400)
+            return
+        email = str(payload.get("email", "")).strip().lower()
+        checkout_id = str(payload.get("checkout_id", "")).strip()
+        if "@" not in email or not checkout_id:
+            self._send_json({"error": "email_and_checkout_id_required"}, 400)
+            return
+        import licensing
+        with licensing.connect() as db:
+            row = db.execute("SELECT plan FROM pending_payments WHERE checkout_id = ? AND consumed = 0", (checkout_id,)).fetchone()
+            if not row:
+                self._send_json({"error": "payment_not_found"}, 404)
+                return
+            plan = row[0]
+            db.execute("UPDATE pending_payments SET consumed = 1 WHERE checkout_id = ?", (checkout_id,))
+        days = 31 if plan == "monthly" else 366
+        key = licensing.create_license(email, plan, days, provider="chargily", provider_ref=checkout_id)
+        print(f"[CHARGILY] Licence réclamée pour {email} ({plan})", flush=True)
+        try:
+            import mailer
+            mailer.send_license_email(email, key, plan)
+        except Exception as exc:
+            print(f"[MAIL] Erreur : {exc}", flush=True)
+        self._send_json({"status": "license_created", "email": email, "plan": plan})
+
     def _handle_chargily_webhook(self) -> None:
         try:
             import chargily
