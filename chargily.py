@@ -182,13 +182,35 @@ def handle_webhook(payload: dict) -> dict:
     key = create_license(email, plan, days, provider="chargily", provider_ref=event_id)
 
     print(f"[CHARGILY] Licence créée pour {email} ({plan})")
-    try:
-    import mailer
-    mailer.send_license_email(email, key, plan)
-except Exception as exc:
-    print(f"[CHARGILY] Erreur e-mail : {exc}")
+
+
     if DEBUG:
+
+
         print(f"[CHARGILY][DEBUG] Clé de licence : {key}")
 
+
+
+    # Envoi automatique de l'e-mail
+
+
+    try:
+
+
+        import mailer
+
+
+        mailer.send_license_email(email, key, plan)
+
+
+    except Exception as exc:
+
+
+        print(f"[CHARGILY] Erreur e-mail : {exc}")
+
+
+
     _mark_processed(event_id, event_type, email=email, plan=plan)
+
+
     return {"status": "license_created", "email": email, "plan": plan}
