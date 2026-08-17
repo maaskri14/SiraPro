@@ -135,7 +135,9 @@ def is_success(payload: dict) -> bool:
     event_type = str(
         payload.get("type") or payload.get("event") or payload.get("event_type") or ""
     ).lower()
-    if "payment" in event_type and any(w in event_type for w in ("success", "succeeded", "completed", "paid")):
+    
+    # Accepte "payment.succeeded" ET "checkout.paid"
+    if "paid" in event_type or "succeeded" in event_type or "completed" in event_type:
         return True
 
     text = json.dumps(payload).lower()
