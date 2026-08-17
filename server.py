@@ -63,6 +63,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        if self.path == "/api/register_intent":  # PAYCAP:route
+            self._handle_register_intent()
+            return
         if self.path == "/api/claim_license":  # CLAIM:route
             self._handle_claim_license()
             return
@@ -237,6 +240,30 @@ class AppHandler(SimpleHTTPRequestHandler):
         except Exception as exc:
             print(f"[MAIL] Erreur : {exc}", flush=True)
         self._send_json({"status": "license_created", "email": email, "plan": plan})
+
+
+    def _handle_register_intent(self) -> None:  # PAYCAP:method
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except Exception:
+            self._send_json({"error": "invalid_json"}, 400)
+            return
+        email = str(payload.get("email", "")).strip().lower()
+        plan = payload.get("plan") if payload.get("plan") in ("monthly", "annual") else "monthly"
+        if "@" not in email:
+            self._send_json({"error": "invalid_email"}, 400)
+            return
+        import licensing
+        with licensing.connect() as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS payment_intents ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, plan TEXT,"
+                "consumed INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            )
+            db.execute("INSERT INTO payment_intents (email, plan) VALUES (?, ?)", (email, plan))
+        print(f"[INTENT] E-mail enregistré avant paiement : {email} ({plan})", flush=True)
+        self._send_json({"status": "ok"})
 
     def _handle_chargily_webhook(self) -> None:
         try:

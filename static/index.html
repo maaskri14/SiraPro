@@ -164,4 +164,27 @@ box-shadow:0 6px 22px rgba(0,0,0,.28);letter-spacing:.3px}
   setInterval(ensure, 1000);
 })();
 </script>
+
+<script>
+// PAYCAP:injected
+document.addEventListener('click', function(ev){
+  var el = ev.target.closest ? ev.target.closest('button, a, [role="button"]') : null;
+  if (!el) return;
+  var t = (el.textContent || '');
+  if (!/mensuel|annuel|payer|500\s*DA|5\s?000\s*DA|CIB|Edahabia/i.test(t)) return;
+  var plan = /annuel|5\s?000/i.test(t) ? 'annual' : 'monthly';
+  var ask = window.prompt('Votre e-mail pour recevoir votre cl\u00e9 d\u2019activation apr\u00e8s paiement :', localStorage.getItem('sirapro_email') || '');
+  if (ask === null) { ev.preventDefault(); ev.stopPropagation(); return; }
+  ask = (ask || '').trim().toLowerCase();
+  if (ask.indexOf('@') > 0) {
+    localStorage.setItem('sirapro_email', ask);
+    try {
+      var x = new XMLHttpRequest();
+      x.open('POST', '/api/register_intent', false);
+      x.setRequestHeader('Content-Type', 'application/json');
+      x.send(JSON.stringify({email: ask, plan: plan}));
+    } catch (e) {}
+  }
+}, true);
+</script>
 </body></html>

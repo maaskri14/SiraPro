@@ -184,6 +184,24 @@ def handle_webhook(payload: dict) -> dict:
         _mark_processed(event_id, event_type)
         return {"status": "missing_plan"}
 
+    if not email:  # AUTOEMAIL:patched
+        with connect() as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS payment_intents ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, plan TEXT,"
+                "consumed INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            )
+            row = db.execute(
+                "SELECT id, email FROM payment_intents WHERE consumed = 0 AND plan = ? "
+                "AND created_at >= datetime('now', '-2 hours') ORDER BY id ASC LIMIT 1",
+                (plan,),
+            ).fetchone()
+        if row:
+            intent_id, email = row
+            with connect() as db:
+                db.execute("UPDATE payment_intents SET consumed = 1 WHERE id = ?", (intent_id,))
+            print(f"[INTENT] E-mail retrouvé automatiquement : {email}", flush=True)
+
     if not email:
         checkout_id = str((payload.get("data") or {}).get("id") or event_id)
         with connect() as db:
