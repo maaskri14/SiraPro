@@ -67,6 +67,16 @@ def _is_processed(event_id: str) -> bool:
     with connect() as db:
         row = db.execute(
             "SELECT 1 FROM chargily_events WHERE event_id = ?", (event_id,)
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_payments (
+                checkout_id TEXT PRIMARY KEY,
+                plan TEXT,
+                consumed INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         ).fetchone()
     return row is not None
 
@@ -174,46 +184,102 @@ def handle_webhook(payload: dict) -> dict:
         return {"status": "ignored_not_success"}
 
     email = _find_email(payload)
+
+
     plan = extract_plan(payload)
 
-    if not plan:
-            _mark_processed(event_id, event_type)
-            return {"status": "missing_plan"}
 
-        if not email:
-            checkout_id = str((payload.get("data") or {}).get("id") or event_id)
-            with connect() as db:
-                db.execute(
-                    "CREATE TABLE IF NOT EXISTS pending_payments ("
-                    "checkout_id TEXT PRIMARY KEY, plan TEXT, consumed INTEGER DEFAULT 0,"
-                    "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
-                )
-                db.execute(
-                    "INSERT OR IGNORE INTO pending_payments (checkout_id, plan) VALUES (?, ?)",
-                    (checkout_id, plan),
-                )
-            print(f"[CHARGILY] Paiement {checkout_id} en attente d'e-mail ({plan})", flush=True)
-            _mark_processed(event_id, event_type, plan=plan)
-            return {"status": "pending_email", "checkout_id": checkout_id}
+
+    if not plan:
+
+
+        _mark_processed(event_id, event_type)
+
+
+        return {"status": "missing_plan"}
+
+
+
+    if not email:
+
+
+        checkout_id = str((payload.get("data") or {}).get("id") or event_id)
+
+
+        with connect() as db:
+
+
+            db.execute(
+
+
+                "INSERT OR IGNORE INTO pending_payments (checkout_id, plan) VALUES (?, ?)",
+
+
+                (checkout_id, plan),
+
+
+            )
+
+
+        print(f"[CHARGILY] Paiement {checkout_id} en attente d'e-mail ({plan})", flush=True)
+
+
+        _mark_processed(event_id, event_type, plan=plan)
+
+
+        return {"status": "pending_email", "checkout_id": checkout_id}
+
+
 
     days = 31 if plan == "monthly" else 366
 
+
     key = create_license(email, plan, days, provider="chargily", provider_ref=event_id)
 
-    print(f"[CHARGILY] Licence créée pour {email} ({plan})")
+
+
+    print(f"[CHARGILY] Licence créée pour {email} ({plan})", flush=True)
+
+
     if DEBUG:
-        print(f"[CHARGILY][DEBUG] Clé de licence : {key}")
+
+
+        print(f"[CHARGILY][DEBUG] Clé de licence : {key}", flush=True)
+
+
 
     try:
+
+
         import mailer
+
+
         print(f"[MAIL] Tentative d'envoi à {email}...", flush=True)
+
+
         ok = mailer.send_license_email(email, key, plan)
+
+
         if ok:
+
+
             print(f"[MAIL] ✅ E-mail envoyé avec succès à {email}", flush=True)
+
+
         else:
-            print(f"[MAIL] ⚠️ Envoi ignoré (SMTP non configuré ou échec)", flush=True)
+
+
+            print(f"[MAIL] ⚠️ Envoi non effectué (SMTP non configuré)", flush=True)
+
+
     except Exception as exc:
+
+
         print(f"[MAIL] ❌ ERREUR MAILER : {exc}", flush=True)
 
+
+
     _mark_processed(event_id, event_type, email=email, plan=plan)
+
+
     return {"status": "license_created", "email": email, "plan": plan}
