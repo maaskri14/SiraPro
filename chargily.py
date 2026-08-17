@@ -187,9 +187,11 @@ def handle_webhook(payload: dict) -> dict:
 
     try:
         import mailer
+        print(f"[MAIL] Tentative d'envoi à {email}...", flush=True)
         mailer.send_license_email(email, key, plan)
+        print(f"[MAIL] ✅ E-mail envoyé avec succès !", flush=True)
     except Exception as exc:
-        print(f"[CHARGILY] Erreur e-mail : {exc}")
+        print(f"[MAIL] ❌ ERREUR MAILER : {exc}", flush=True)
 
     _mark_processed(event_id, event_type, email=email, plan=plan)
     return {"status": "license_created", "email": email, "plan": plan}
