@@ -21,6 +21,20 @@ box-shadow:0 6px 22px rgba(0,0,0,.28);letter-spacing:.3px}
 /* TWEAK:injected */
 .bigScanWrap{background:linear-gradient(90deg,rgba(30,116,90,.28),rgba(124,58,237,.22))!important;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
 </style>
+
+<!-- Meta Pixel Code (PIXEL:injected) -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f._fbq=f._fbq||[];n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;
+n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
+(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '1234567890123456');
+fbq('track', 'PageView');
+</script>
+<!-- End Meta Pixel Code -->
 </head>
 <body>
 
@@ -228,5 +242,17 @@ document.addEventListener('click', function(ev){
   fix();
   setInterval(fix, 1000);
 })();
+</script>
+
+<script>
+// PIXEL:events
+document.addEventListener('click', function(ev){
+  var el = ev.target.closest ? ev.target.closest('button, a, [role="button"]') : null;
+  if (!el) return;
+  var t = (el.textContent || '');
+  if (/mensuel|annuel|payer|500\s*DA|5\s?000\s*DA|CIB|Edahabia/i.test(t) && window.fbq) {
+    fbq('track', 'InitiateCheckout');
+  }
+}, true);
 </script>
 </body></html>
