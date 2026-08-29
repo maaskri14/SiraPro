@@ -69,6 +69,86 @@
     #seoScanBtn{border:0;border-radius:12px;padding:13px 18px;background:#1e745a;color:#fff;font-weight:800;cursor:pointer}
     #seoScanBtn:hover{filter:brightness(.95)}
   </style>
+
+<style id="seoResourcesStyle">
+#seoResources{
+  max-width:1180px;
+  margin:34px auto 0;
+  padding:34px 18px 10px;
+  direction:ltr;
+  text-align:left;
+}
+#seoResources .seo-res-head{
+  max-width:760px;
+  margin-bottom:22px;
+}
+#seoResources .seo-kicker{
+  display:inline-block;
+  padding:6px 11px;
+  border-radius:999px;
+  background:#e9f7f2;
+  color:#1e745a;
+  font-size:13px;
+  font-weight:800;
+  margin-bottom:10px;
+}
+#seoResources h2{
+  margin:0 0 10px;
+  color:#0f172a;
+  font-size:clamp(26px,4vw,36px);
+  line-height:1.15;
+}
+#seoResources .seo-res-head p{
+  margin:0;
+  color:#64748b;
+  line-height:1.7;
+}
+#seoResources .seo-res-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:18px;
+}
+#seoResources .seo-res-card{
+  display:block;
+  padding:22px;
+  border:1px solid #e2e8f0;
+  border-radius:16px;
+  background:#fff;
+  color:#0f172a;
+  text-decoration:none;
+  box-shadow:0 8px 24px rgba(15,23,42,.05);
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
+}
+#seoResources .seo-res-card:hover{
+  transform:translateY(-3px);
+  box-shadow:0 12px 30px rgba(15,23,42,.09);
+  border-color:#c4b5fd;
+}
+#seoResources .seo-res-icon{
+  font-size:28px;
+  display:block;
+  margin-bottom:12px;
+}
+#seoResources .seo-res-card strong{
+  display:block;
+  font-size:18px;
+  margin-bottom:8px;
+}
+#seoResources .seo-res-card span{
+  display:block;
+  color:#64748b;
+  line-height:1.55;
+}
+#seoResources .seo-res-link{
+  margin-top:14px;
+  color:#1e745a !important;
+  font-weight:800;
+}
+@media(max-width:850px){
+  #seoResources .seo-res-grid{grid-template-columns:1fr}
+}
+</style>
+
 </head>
 <body>
   <noscript><img height="1" width="1" style="display:none" alt="" src="https://www.facebook.com/tr?id=2664042690682594&amp;ev=PageView&amp;noscript=1"></noscript>
@@ -97,6 +177,41 @@
   </section>
   <aside><div class="score-card"><div><span data-i18n="atsReady">جاهزية ATS</span><strong id="score">0%</strong></div><div class="meter"><i id="meter"></i></div><ul id="checks"></ul></div><div class="export"><button id="import-json-btn" type="button" style="margin:4px;padding:10px 14px;border:1px solid #1e745a;border-radius:8px;background:#ffffff;color:#1e745a;font-weight:700;cursor:pointer;">📥 Importer JSON</button><input type="file" id="import-json-input" accept=".json,application/json" style="display:none"><h3 data-i18n="exportCv">تصدير السيرة</h3><div id="exportButtons"></div><small id="exportMessage" data-i18n="trialExport">Version d’évaluation : activez une licence pour exporter.</small></div><div class="preview-wrap"><div class="preview-label"><span data-i18n="preview">معاينة السيرة</span><button id="printBtn" class="mini" data-i18n="print">طباعة</button></div><article id="preview"></article><div id="trialWatermark" class="trial-watermark">VERSION D’ÉVALUATION</div></div></aside>
 </main>
+
+<section id="seoResources" aria-labelledby="seoResourcesTitle">
+  <div class="seo-res-head">
+    <span class="seo-kicker">Ressources gratuites SiraPro</span>
+    <h2 id="seoResourcesTitle">Améliorez votre CV avant de postuler</h2>
+    <p>
+      Découvrez nos guides gratuits pour tester votre CV, comprendre la compatibilité ATS
+      et préparer une candidature plus claire pour le marché de l'emploi en Algérie.
+    </p>
+  </div>
+
+  <div class="seo-res-grid">
+    <a class="seo-res-card" href="/test-cv-ats-gratuit.html">
+      <span class="seo-res-icon">🔍</span>
+      <strong>Tester mon CV ATS gratuitement</strong>
+      <span>Découvrez votre score ATS et identifiez les principaux points à améliorer.</span>
+      <span class="seo-res-link">Faire le test →</span>
+    </a>
+
+    <a class="seo-res-card" href="/cv-ats-algerie.html">
+      <span class="seo-res-icon">📄</span>
+      <strong>Guide CV ATS Algérie</strong>
+      <span>Comprenez comment structurer un CV clair, lisible et adapté aux systèmes ATS.</span>
+      <span class="seo-res-link">Lire le guide →</span>
+    </a>
+
+    <a class="seo-res-card" href="/cv-jeune-diplome-algerie.html">
+      <span class="seo-res-icon">🎓</span>
+      <strong>CV jeune diplômé sans expérience</strong>
+      <span>Apprenez à valoriser formation, projets, stages et compétences pour un premier emploi.</span>
+      <span class="seo-res-link">Voir les conseils →</span>
+    </a>
+  </div>
+</section>
+
 <dialog id="licenseDialog"><button class="dialog-close" id="closeLicense" aria-label="Fermer">×</button><div class="dialog-copy"><span class="eyebrow">SIRAPRO PREMIUM</span><h2>Exportez votre CV professionnel</h2><p>L’aperçu reste gratuit. Choisissez une formule pour débloquer PDF, Word, HTML, TXT, JSON et l’impression.</p></div><div class="plans"><article><span>Mensuel</span><strong>500 DA</strong><small>Renouvellement mensuel</small><button data-checkout="monthly">Choisir mensuel</button></article><article class="recommended"><i>Recommandé</i><span>Annuel</span><strong>5 000 DA</strong><small>Économisez 1 000 DA par an</small><button data-checkout="annual">Choisir annuel</button></article></div><div class="activation"><h3>Vous avez déjà une licence ?</h3><div class="activation-grid"><input id="licenseEmail" type="email" placeholder="votre@email.com"><input id="licenseKey" placeholder="CVPRO-XXXXXX-XXXXXX-XXXXXX-XXXXXX"><button id="activateLicense">Activer la licence</button></div><p id="licenseFeedback" role="status"></p></div></dialog>
 <template id="experienceTpl"><div class="repeat-card"><button type="button" class="remove" aria-label="حذف">×</button><div class="grid"><label>المسمى الوظيفي<input data-key="role"></label><label>الشركة<input data-key="company"></label><label>من<input data-key="start" placeholder="2022"></label><label>إلى<input data-key="end" placeholder="حتى الآن"></label></div><label>الإنجازات<textarea data-key="details" rows="4" placeholder="طورت... مما أدى إلى زيادة... بنسبة 20%"></textarea></label></div></template>
 <template id="educationTpl"><div class="repeat-card"><button type="button" class="remove" aria-label="حذف">×</button><div class="grid"><label>الشهادة / التخصص<input data-key="degree"></label><label>المؤسسة<input data-key="institution"></label><label>من<input data-key="start"></label><label>إلى<input data-key="end"></label></div><label>تفاصيل إضافية<textarea data-key="details" rows="3"></textarea></label></div></template>
