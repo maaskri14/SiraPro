@@ -149,6 +149,27 @@
 }
 </style>
 
+
+<style id="viralShareStyle">
+#viralSharePanel{margin-top:18px;padding:20px;border:1px solid rgba(30,116,90,.22);border-radius:16px;background:linear-gradient(135deg,#f0fdf8 0%,#f5f3ff 100%);text-align:center;direction:ltr;box-shadow:0 8px 24px rgba(15,23,42,.08)}
+#viralSharePanel[hidden]{display:none!important}
+#viralSharePanel .viral-badge{display:inline-block;padding:6px 11px;margin-bottom:8px;border-radius:999px;background:#e6f5ef;color:#1e745a;font-size:13px;font-weight:900}
+#viralSharePanel h3{margin:5px 0 8px;color:#0f172a;font-size:24px;line-height:1.25}
+#viralScore{color:#7c3aed;font-size:32px;font-weight:900}
+#viralLevel{display:inline-block;margin:5px 0 10px;padding:7px 12px;border-radius:10px;font-weight:900}
+#viralSharePanel .viral-message{margin:8px auto 15px;max-width:520px;color:#475569;line-height:1.55}
+#viralSharePanel .viral-buttons{display:flex;flex-wrap:wrap;justify-content:center;gap:9px}
+#viralSharePanel .viral-buttons button{border:0;border-radius:11px;padding:11px 15px;font-size:14px;font-weight:900;cursor:pointer;transition:transform .15s ease,filter .15s ease}
+#viralSharePanel .viral-buttons button:hover{transform:translateY(-1px);filter:brightness(.97)}
+#shareScoreBtn{color:#fff;background:linear-gradient(90deg,#1e745a,#7c3aed)}
+#shareWhatsappBtn{color:#fff;background:#25D366}
+#shareFacebookBtn{color:#fff;background:#1877F2}
+#copyShareBtn{color:#1e745a;background:#fff;border:1px solid #cbd5e1!important}
+#shareFeedback{min-height:18px;margin:10px 0 0;color:#1e745a;font-size:13px;font-weight:800}
+#viralPrivacy{margin:8px 0 0;color:#64748b;font-size:11px}
+@media(max-width:650px){#viralSharePanel .viral-buttons{flex-direction:column}#viralSharePanel .viral-buttons button{width:100%}}
+</style>
+
 </head>
 <body>
   <noscript><img height="1" width="1" style="display:none" alt="" src="https://www.facebook.com/tr?id=2664042690682594&amp;ev=PageView&amp;noscript=1"></noscript>
@@ -272,6 +293,22 @@
     <textarea id="scan-job" rows="4" placeholder="(Optionnel) Collez ici l'offre d'emploi pour calculer la compatibilité..." style="width:100%;margin:8px 0;padding:10px;border:1px solid #cbd5e1;border-radius:8px;"></textarea>
     <button id="scan-go" style="border:0;border-radius:10px;padding:12px 18px;background:#7c3aed;color:#fff;font-weight:700;cursor:pointer;">Analyser mon CV</button>
     <div id="scan-result" style="margin-top:16px;"></div>
+
+    <section id="viralSharePanel" lang="fr-DZ" dir="ltr" hidden aria-live="polite">
+      <span class="viral-badge">🎯 Défi CV ATS</span>
+      <h3>Votre score ATS : <span id="viralScore">--</span>/100</h3>
+      <div id="viralLevel"></div>
+      <p class="viral-message">Un ami cherche un emploi ? Partagez votre résultat et invitez-le à tester gratuitement son CV.</p>
+      <div class="viral-buttons">
+        <button type="button" id="shareScoreBtn">📤 Défier un ami</button>
+        <button type="button" id="shareWhatsappBtn">🟢 WhatsApp</button>
+        <button type="button" id="shareFacebookBtn">🔵 Facebook</button>
+        <button type="button" id="copyShareBtn">🔗 Copier le lien</button>
+      </div>
+      <p id="shareFeedback"></p>
+      <p id="viralPrivacy">Votre CV et vos informations personnelles ne sont jamais inclus dans le partage.</p>
+    </section>
+
   </div>
 </div>
 <script>
@@ -292,6 +329,8 @@
     if (!file) { alert("Choisissez d'abord une photo ou un PDF de votre CV."); return; }
 
     result.innerHTML = "<p>⏳ Analyse en cours…</p>";
+    var viralPanel = document.getElementById("viralSharePanel");
+    if (viralPanel) viralPanel.hidden = true;
     var fd = new FormData();
     fd.append("file", file, file.name);
     fd.append("kind", (file.name.split(".").pop() || "").toLowerCase());
@@ -318,9 +357,241 @@
           htmlOut += "<p><b>Mots-clés de l'offre trouvés :</b> " + j.job_keywords_matched.join(", ") + "</p>";
         }
         result.innerHTML = htmlOut;
+        if (window.SiraProViralShare && window.SiraProViralShare.show) {
+          window.SiraProViralShare.show(j.ats_score);
+        }
       })
       .catch(function (e) { result.innerHTML = "<p style='color:#b91c1c;'>❌ " + e + "</p>"; });
   });
+})();
+</script>
+
+
+<script id="viralShareScript">
+(function () {
+  "use strict";
+
+  var currentATSScore = null;
+
+  function normalizeScore(value) {
+    var score = Math.round(Number(value));
+    if (!Number.isFinite(score) || score < 0 || score > 100) return null;
+    return score;
+  }
+
+  function getReferralCode() {
+    var key = "sirapro_referral_code";
+    var code = localStorage.getItem(key);
+    if (!code) {
+      if (window.crypto && crypto.getRandomValues) {
+        var a = new Uint32Array(2);
+        crypto.getRandomValues(a);
+        code = (a[0].toString(36) + a[1].toString(36)).slice(0, 8).toUpperCase();
+      } else {
+        code = Math.random().toString(36).slice(2, 10).toUpperCase();
+      }
+      localStorage.setItem(key, code);
+    }
+    return code;
+  }
+
+  function buildShareURL(source) {
+    var url = new URL("https://sirapro.onrender.com/");
+    url.searchParams.set("utm_source", source || "share");
+    url.searchParams.set("utm_medium", "organic_share");
+    url.searchParams.set("utm_campaign", "ats_score");
+    url.searchParams.set("ref", getReferralCode());
+    return url.toString();
+  }
+
+  function buildShareText() {
+    var score = currentATSScore;
+
+    if (score >= 85) {
+      return "🏆 J'ai obtenu " + score + "/100 au test ATS SiraPro !\\n\\nPeux-tu battre mon score ? 😃\\n\\n🇩🇿 Teste gratuitement ton CV.";
+    }
+    if (score >= 70) {
+      return "🟢 Mon CV obtient " + score + "/100 au test ATS SiraPro.\\n\\nEt le tien ? 😃\\n\\n🇩🇿 Teste gratuitement ton CV.";
+    }
+    return "🔍 Je viens de tester mon CV avec SiraPro et j'ai découvert les points à améliorer.\\n\\nEt ton CV ?\\n\\n🇩🇿 Fais le test gratuitement.";
+  }
+
+  function setFeedback(message) {
+    var el = document.getElementById("shareFeedback");
+    if (!el) return;
+    el.textContent = message || "";
+    if (message) {
+      setTimeout(function () {
+        if (el.textContent === message) el.textContent = "";
+      }, 4000);
+    }
+  }
+
+  function trackShare(channel) {
+    try {
+      if (window.fbq) {
+        fbq("trackCustom", "ShareATS", {
+          channel: channel,
+          ats_score: currentATSScore
+        });
+      }
+    } catch (e) {}
+  }
+
+  function showViralShare(scoreValue) {
+    var score = normalizeScore(scoreValue);
+    if (score === null) return;
+
+    currentATSScore = score;
+
+    var panel = document.getElementById("viralSharePanel");
+    var scoreEl = document.getElementById("viralScore");
+    var levelEl = document.getElementById("viralLevel");
+
+    if (!panel || !scoreEl || !levelEl) return;
+
+    scoreEl.textContent = score;
+
+    if (score < 50) {
+      levelEl.textContent = "🔴 À améliorer";
+      levelEl.style.background = "#fee2e2";
+      levelEl.style.color = "#991b1b";
+    } else if (score < 70) {
+      levelEl.textContent = "🟠 Score moyen";
+      levelEl.style.background = "#ffedd5";
+      levelEl.style.color = "#9a3412";
+    } else if (score < 85) {
+      levelEl.textContent = "🟢 Bon score";
+      levelEl.style.background = "#dcfce7";
+      levelEl.style.color = "#166534";
+    } else {
+      levelEl.textContent = "🏆 Excellent score";
+      levelEl.style.background = "#ede9fe";
+      levelEl.style.color = "#6d28d9";
+    }
+
+    panel.hidden = false;
+    setTimeout(function () {
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
+  }
+
+  async function shareScore() {
+    if (currentATSScore === null) return;
+
+    var data = {
+      title: "Mon score ATS - SiraPro",
+      text: buildShareText(),
+      url: buildShareURL("native_share")
+    };
+
+    try {
+      if (navigator.share && (!navigator.canShare || navigator.canShare(data))) {
+        await navigator.share(data);
+        trackShare("native_share");
+      } else {
+        await navigator.clipboard.writeText(data.text + "\\n\\n👉 " + data.url);
+        setFeedback("✅ Message et lien copiés.");
+        trackShare("copy_fallback");
+      }
+    } catch (error) {
+      if (error && error.name !== "AbortError") {
+        setFeedback("Le partage direct n'est pas disponible. Utilisez WhatsApp ou Copier le lien.");
+      }
+    }
+  }
+
+  function shareWhatsApp() {
+    if (currentATSScore === null) return;
+    var url = buildShareURL("whatsapp");
+    var message = buildShareText() + "\\n\\n👉 " + url;
+    window.open("https://wa.me/?text=" + encodeURIComponent(message), "_blank", "noopener,noreferrer");
+    trackShare("whatsapp");
+  }
+
+
+  function shareFacebook() {
+    if (currentATSScore === null) return;
+
+    var url = buildShareURL("facebook");
+
+    /*
+      Facebook's web sharer reliably accepts the destination URL.
+      The title/description/image displayed by Facebook come from
+      the Open Graph metadata of the shared SiraPro page.
+    */
+    var facebookURL =
+      "https://www.facebook.com/sharer/sharer.php?u=" +
+      encodeURIComponent(url);
+
+    window.open(
+      facebookURL,
+      "siraproFacebookShare",
+      "width=720,height=620,noopener,noreferrer"
+    );
+
+    trackShare("facebook");
+  }
+
+  async function copyShareLink() {
+    if (currentATSScore === null) return;
+
+    var url = buildShareURL("copy_link");
+    var message = buildShareText() + "\\n\\n👉 " + url;
+
+    try {
+      await navigator.clipboard.writeText(message);
+      setFeedback("✅ Message et lien copiés.");
+      trackShare("copy_link");
+    } catch (error) {
+      window.prompt("Copiez ce lien :", url);
+    }
+  }
+
+  function captureIncomingReferral() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var ref = params.get("ref");
+      var campaign = params.get("utm_campaign");
+
+      if (ref) {
+        localStorage.setItem("sirapro_referred_by", ref);
+      }
+
+      if (ref && campaign === "ats_score") {
+        try {
+          if (window.fbq) {
+            fbq("trackCustom", "ViralVisit", { referral_code: ref });
+          }
+        } catch (e) {}
+
+        setTimeout(function () {
+          var bigBtn = document.getElementById("bigScanBtn");
+          if (bigBtn) {
+            bigBtn.textContent = "🎯 Un ami vous défie — testez votre CV gratuitement";
+          }
+        }, 1200);
+      }
+    } catch (e) {}
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var shareBtn = document.getElementById("shareScoreBtn");
+    var waBtn = document.getElementById("shareWhatsappBtn");
+    var fbBtn = document.getElementById("shareFacebookBtn");
+    var copyBtn = document.getElementById("copyShareBtn");
+
+    if (shareBtn) shareBtn.addEventListener("click", shareScore);
+    if (waBtn) waBtn.addEventListener("click", shareWhatsApp);
+    if (fbBtn) fbBtn.addEventListener("click", shareFacebook);
+    if (copyBtn) copyBtn.addEventListener("click", copyShareLink);
+
+    captureIncomingReferral();
+  });
+
+  window.SiraProViralShare = {
+    show: showViralShare
+  };
 })();
 </script>
 
