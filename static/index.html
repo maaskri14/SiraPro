@@ -68,7 +68,19 @@
     .seo-intro p{margin:0 0 16px;max-width:850px;line-height:1.65;color:#475569}
     #seoScanBtn{border:0;border-radius:12px;padding:13px 18px;background:#1e745a;color:#fff;font-weight:800;cursor:pointer}
     #seoScanBtn:hover{filter:brightness(.95)}
-  </style>
+  
+#storyPreviewPanel{margin-top:16px;padding:18px;border:1px solid rgba(124,58,237,.18);border-radius:16px;background:#fff;text-align:center;box-shadow:0 8px 24px rgba(15,23,42,.06)}
+#storyPreviewPanel[hidden]{display:none!important}
+#storyPreviewPanel h4{margin:0 0 10px;color:#0f172a;font-size:20px}
+#storyPreviewPanel p{margin:0 0 12px;color:#64748b;line-height:1.55}
+#storyPreviewImage{width:100%;max-width:290px;border-radius:18px;border:1px solid #e2e8f0;box-shadow:0 8px 22px rgba(15,23,42,.08)}
+#storyPreviewActions{display:flex;flex-wrap:wrap;justify-content:center;gap:9px;margin-top:14px}
+#storyPreviewActions a,#storyPreviewActions button{border:0;border-radius:11px;padding:11px 14px;font-size:14px;font-weight:900;cursor:pointer;text-decoration:none}
+#downloadStoryBtn{background:linear-gradient(90deg,#1e745a,#7c3aed);color:#fff}
+#copyStoryLinkBtn{background:#fff;color:#1e745a;border:1px solid #cbd5e1!important}
+#storyHint{margin-top:10px;color:#475569;font-size:13px}
+
+</style>
 
 <style id="seoResourcesStyle">
 #seoResources{
@@ -164,6 +176,7 @@
 #shareScoreBtn{color:#fff;background:linear-gradient(90deg,#1e745a,#7c3aed)}
 #shareWhatsappBtn{color:#fff;background:#25D366}
 #shareFacebookBtn{color:#fff;background:#1877F2}
+#createStoryBtn{color:#fff;background:linear-gradient(90deg,#7c3aed,#1e745a)}
 #copyShareBtn{color:#1e745a;background:#fff;border:1px solid #cbd5e1!important}
 #shareFeedback{min-height:18px;margin:10px 0 0;color:#1e745a;font-size:13px;font-weight:800}
 #viralPrivacy{margin:8px 0 0;color:#64748b;font-size:11px}
@@ -303,10 +316,22 @@
         <button type="button" id="shareScoreBtn">📤 Défier un ami</button>
         <button type="button" id="shareWhatsappBtn">🟢 WhatsApp</button>
         <button type="button" id="shareFacebookBtn">🔵 Facebook</button>
+        <button type="button" id="createStoryBtn">📲 Créer ma Story ATS</button>
         <button type="button" id="copyShareBtn">🔗 Copier le lien</button>
       </div>
       <p id="shareFeedback"></p>
       <p id="viralPrivacy">Votre CV et vos informations personnelles ne sont jamais inclus dans le partage.</p>
+    </section>
+
+    <section id="storyPreviewPanel" hidden aria-live="polite">
+      <h4>📲 Votre Story ATS est prête</h4>
+      <p>Publiez cette image dans vos Statuts WhatsApp, Facebook Story ou Instagram Story.</p>
+      <img id="storyPreviewImage" alt="Aperçu de la Story ATS SiraPro">
+      <div id="storyPreviewActions">
+        <a id="downloadStoryBtn" href="#" download="sirapro-story-ats.png">⬇️ Télécharger la Story</a>
+        <button type="button" id="copyStoryLinkBtn">🔗 Copier le lien SiraPro</button>
+      </div>
+      <p id="storyHint">Conseil : téléchargez l’image puis publiez-la comme Story avec votre commentaire.</p>
     </section>
 
   </div>
@@ -581,6 +606,78 @@
     });
   }
 
+
+  var currentStoryLink = null;
+  var currentStoryImage = null;
+
+  function buildDownloadName() {
+    var score = currentATSScore === null ? "score" : String(currentATSScore);
+    return "sirapro-story-ats-" + score + ".png";
+  }
+
+  async function createStoryCard() {
+    if (currentATSScore === null) return;
+
+    setFeedback("Préparation de votre Story ATS…");
+
+    try {
+      var response = await fetch("/api/share-link", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          score: currentATSScore,
+          ref: getReferralCode(),
+          channel: "story"
+        })
+      });
+
+      var data = await response.json();
+
+      if (!response.ok || !data.story_image_url) {
+        throw new Error(data.error || "Story ATS indisponible");
+      }
+
+      currentStoryLink = data.destination_url || data.share_url || buildShareURL("story");
+      currentStoryImage = data.story_image_url;
+
+      var panel = document.getElementById("storyPreviewPanel");
+      var image = document.getElementById("storyPreviewImage");
+      var downloadBtn = document.getElementById("downloadStoryBtn");
+
+      if (image) image.src = data.story_image_url;
+      if (downloadBtn) {
+        downloadBtn.href = data.story_image_url;
+        downloadBtn.setAttribute("download", buildDownloadName());
+      }
+
+      if (panel) {
+        panel.hidden = false;
+        setTimeout(function () {
+          panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 120);
+      }
+
+      setFeedback("✅ Story ATS prête. Téléchargez-la puis partagez-la en Story ou Statut.");
+      trackShare("story_card");
+
+    } catch (error) {
+      console.error(error);
+      setFeedback("Impossible de créer la Story ATS pour le moment.");
+    }
+  }
+
+  async function copyStoryLink() {
+    var url = currentStoryLink || buildShareURL("story");
+    try {
+      await navigator.clipboard.writeText(url);
+      setFeedback("✅ Lien SiraPro copié.");
+    } catch (error) {
+      window.prompt("Copiez ce lien :", url);
+    }
+  }
+
   async function copyShareLink() {
     if (currentATSScore === null) return;
 
@@ -627,7 +724,9 @@
     var shareBtn = document.getElementById("shareScoreBtn");
     var waBtn = document.getElementById("shareWhatsappBtn");
     var fbBtn = document.getElementById("shareFacebookBtn");
+    var storyBtn = document.getElementById("createStoryBtn");
     var copyBtn = document.getElementById("copyShareBtn");
+    var copyStoryBtn = document.getElementById("copyStoryLinkBtn");
 
     if (shareBtn) shareBtn.addEventListener("click", shareScore);
     if (waBtn) waBtn.addEventListener("click", shareWhatsApp);
