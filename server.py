@@ -60,6 +60,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         if card_match:
             self._handle_share_card(card_match.group(1))
             return
+
+        # STORY-ATS: dynamic vertical story image
+        story_match = re.fullmatch(r"/story-card/([^/]+)\.png", path)
+        if story_match:
+            self._handle_story_card(story_match.group(1))
+            return
         if self.path.split("?")[0] == "/webhooks/chargily":
             self._send_json({"status": "ok"}, 200)
             return
@@ -504,11 +510,23 @@ class AppHandler(SimpleHTTPRequestHandler):
             )[:24] or "facebook"
 
             token = self._make_share_token(score, ref, channel)
-            share_url = f"{self._public_origin()}/s/{token}"
+            origin = self._public_origin()
+            share_url = f"{origin}/s/{token}"
+            story_image_url = f"{origin}/story-card/{token}.png"
+            destination_query = urlencode({
+                "utm_source": channel,
+                "utm_medium": "organic_share",
+                "utm_campaign": "ats_score",
+                "ref": ref,
+            })
+            destination_url = f"{origin}/?{destination_query}"
 
             self._send_json({
                 "status": "ok",
-                "share_url": share_url
+                "token": token,
+                "share_url": share_url,
+                "story_image_url": story_image_url,
+                "destination_url": destination_url
             })
         except ValueError as exc:
             self._send_json({"error": str(exc)}, 400)
@@ -730,6 +748,179 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
         self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+    def _destination_from_payload(self, payload: dict) -> str:
+        ref = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("ref", "SIRAPRO")))[:24] or "SIRAPRO"
+        channel = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("channel", "share")).lower())[:24] or "share"
+        destination_query = urlencode({
+            "utm_source": channel,
+            "utm_medium": "organic_share",
+            "utm_campaign": "ats_score",
+            "ref": ref,
+        })
+        return f"{self._public_origin()}/?{destination_query}"
+
+    def _fit_text(self, draw, text, font, max_width):
+        words = text.split()
+        lines, current = [], ""
+        for word in words:
+            trial = (current + " " + word).strip()
+            bbox = draw.textbbox((0, 0), trial, font=font)
+            width = bbox[2] - bbox[0]
+            if width <= max_width or not current:
+                current = trial
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines
+
+    def _handle_story_card(self, token: str) -> None:
+        payload = self._decode_share_token(token)
+        if not payload:
+            self.send_error(404, "Story ATS invalide")
+            return
+
+        score = int(payload["score"])
+        icon, level, title, description = self._share_copy(score)
+        destination_url = self._destination_from_payload(payload)
+
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            width, height = 1080, 1920
+            image = Image.new("RGB", (width, height), "#F8FAFC")
+            draw = ImageDraw.Draw(image)
+
+            draw.rectangle((0, 0, width, height), fill="#F8FAFC")
+            draw.rounded_rectangle((54, 52, width - 54, height - 52), radius=44, fill="#FFFFFF", outline="#E2E8F0", width=3)
+            draw.rounded_rectangle((86, 92, width - 86, 232), radius=30, fill="#E8F6F1")
+            draw.rounded_rectangle((86, height - 360, width - 86, height - 94), radius=34, fill="#F5F3FF")
+            draw.rounded_rectangle((86, 270, width - 86, 1120), radius=40, fill="#F7FBFA", outline="#DDE8E4", width=2)
+
+            def load_font(size, bold=False):
+                candidates = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+                ]
+                for candidate in candidates:
+                    try:
+                        return ImageFont.truetype(candidate, size=size)
+                    except Exception:
+                        pass
+                return ImageFont.load_default()
+
+            font_brand = load_font(54, True)
+            font_kicker = load_font(30, True)
+            font_score = load_font(158, True)
+            font_level = load_font(42, True)
+            font_title = load_font(46, True)
+            font_desc = load_font(34, False)
+            font_url = load_font(28, True)
+            font_small = load_font(24, False)
+
+            brand = "SiraPro 🇩🇿"
+            bbox = draw.textbbox((0, 0), brand, font=font_brand)
+            draw.text(((width - (bbox[2]-bbox[0]))/2, 128), brand, font=font_brand, fill="#1E745A")
+
+            kicker = "MON SCORE ATS"
+            bbox = draw.textbbox((0, 0), kicker, font=font_kicker)
+            draw.text(((width - (bbox[2]-bbox[0]))/2, 310), kicker, font=font_kicker, fill="#475569")
+
+            score_text = f"{score}/100"
+            bbox = draw.textbbox((0, 0), score_text, font=font_score)
+            draw.text(((width - (bbox[2]-bbox[0]))/2, 430), score_text, font=font_score, fill="#7C3AED")
+
+            badge_text = f"{icon} {level}"
+            bbox = draw.textbbox((0, 0), badge_text, font=font_level)
+            badge_w = (bbox[2]-bbox[0]) + 50
+            badge_h = (bbox[3]-bbox[1]) + 24
+            badge_x1 = (width - badge_w) / 2
+            badge_y1 = 670
+            badge_x2 = badge_x1 + badge_w
+            badge_y2 = badge_y1 + badge_h
+
+            if score >= 85:
+                badge_bg, badge_fg = "#EDE9FE", "#6D28D9"
+            elif score >= 70:
+                badge_bg, badge_fg = "#DCFCE7", "#166534"
+            elif score >= 50:
+                badge_bg, badge_fg = "#FFEDD5", "#9A3412"
+            else:
+                badge_bg, badge_fg = "#FEE2E2", "#991B1B"
+
+            draw.rounded_rectangle((badge_x1, badge_y1, badge_x2, badge_y2), radius=22, fill=badge_bg)
+            draw.text((badge_x1 + 25, badge_y1 + 12), badge_text, font=font_level, fill=badge_fg)
+
+            challenge_title = "Peux-tu battre mon score ?"
+            lines = self._fit_text(draw, challenge_title, font_title, width - 200)
+            y = 820
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=font_title)
+                draw.text(((width - (bbox[2]-bbox[0]))/2, y), line, font=font_title, fill="#0F172A")
+                y += 58
+
+            desc = "Scanne ton CV gratuitement avec SiraPro et découvre ton score ATS."
+            lines = self._fit_text(draw, desc, font_desc, width - 220)
+            y = 940
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=font_desc)
+                draw.text(((width - (bbox[2]-bbox[0]))/2, y), line, font=font_desc, fill="#475569")
+                y += 44
+
+            qr_x = (width - 300) // 2
+            qr_y = 1185
+            qr_size = 300
+
+            try:
+                import qrcode
+                qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+                qr.add_data(destination_url)
+                qr.make(fit=True)
+                qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                qr_img = qr_img.resize((qr_size, qr_size))
+                image.paste(qr_img, (qr_x, qr_y))
+            except Exception:
+                draw.rounded_rectangle((qr_x, qr_y, qr_x + qr_size, qr_y + qr_size), radius=20, fill="#FFFFFF", outline="#CBD5E1", width=3)
+                draw.text((qr_x + 64, qr_y + 122), "QR", font=load_font(78, True), fill="#64748B")
+                draw.text((qr_x + 30, qr_y + 210), "Indisponible", font=load_font(26, True), fill="#94A3B8")
+
+            qr_label = "Scanne le QR Code"
+            bbox = draw.textbbox((0, 0), qr_label, font=font_kicker)
+            draw.text(((width - (bbox[2]-bbox[0]))/2, qr_y + qr_size + 28), qr_label, font=font_kicker, fill="#1E745A")
+
+            footer1 = "Teste gratuitement ton CV"
+            bbox = draw.textbbox((0, 0), footer1, font=font_title)
+            draw.text(((width - (bbox[2]-bbox[0]))/2, height - 310), footer1, font=font_title, fill="#0F172A")
+
+            footer2 = "sirapro.onrender.com"
+            bbox = draw.textbbox((0, 0), footer2, font=font_url)
+            draw.text(((width - (bbox[2]-bbox[0]))/2, height - 235), footer2, font=font_url, fill="#1E745A")
+
+            footer3 = "Publiez cette image en Story, Statut WhatsApp, Facebook ou Instagram."
+            lines = self._fit_text(draw, footer3, font_small, width - 220)
+            y = height - 175
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=font_small)
+                draw.text(((width - (bbox[2]-bbox[0]))/2, y), line, font=font_small, fill="#64748B")
+                y += 32
+
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+            raw = buffer.getvalue()
+
+        except Exception as exc:
+            print(f"[STORY] Génération story ATS indisponible : {exc}", flush=True)
+            self.send_error(500, "Story ATS indisponible")
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Cache-Control", "public, max-age=3600")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
