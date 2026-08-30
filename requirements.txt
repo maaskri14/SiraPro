@@ -5,3 +5,4 @@ python-bidi
 pypdf
 pytesseract
 Pillow
+qrcode[pil]>=7.4
