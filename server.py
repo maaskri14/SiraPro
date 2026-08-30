@@ -1,11 +1,17 @@
 from __future__ import annotations
+import base64
+import hashlib
+import hmac
+import html as html_lib
+import io
 import json
 import mimetypes
 import os
 import re
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 from exporters import export_docx, export_html, export_json, export_pdf, export_txt
 from licensing import activate, authorization_token, verify_token
 
@@ -41,6 +47,19 @@ class AppHandler(SimpleHTTPRequestHandler):
         return str(STATIC / relative)
 
     def do_GET(self) -> None:
+        path = urlparse(self.path).path
+
+        # VIRAL-SHARE: dynamic Facebook/social share page
+        share_match = re.fullmatch(r"/s/([^/]+)", path)
+        if share_match:
+            self._handle_share_page(share_match.group(1))
+            return
+
+        # VIRAL-SHARE: dynamic 1200x630 social image
+        card_match = re.fullmatch(r"/share-card/([^/]+)\.png", path)
+        if card_match:
+            self._handle_share_card(card_match.group(1))
+            return
         if self.path.split("?")[0] == "/webhooks/chargily":
             self._send_json({"status": "ok"}, 200)
             return
@@ -73,6 +92,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._handle_claim_license()
             return
         path = urlparse(self.path).path
+
+        # VIRAL-SHARE: create a signed social URL for a real ATS score
+        if path == "/api/share-link":
+            self._handle_share_link()
+            return
 
         if path == "/api/license/activate":
             try:
@@ -368,6 +392,347 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json({"error": str(exc)}, 500)
         except Exception as exc:
             self._send_json({"error": f"Analyse impossible : {exc}"}, 500)
+
+    # ============================================================
+    # VIRAL-SHARE : liens Facebook dynamiques avec score ATS signé
+    # ============================================================
+
+    def _share_secret(self) -> bytes:
+        secret = (
+            os.getenv("CV_SHARE_SECRET")
+            or os.getenv("CV_LICENSE_SECRET")
+            or os.getenv("CV_ADMIN_SECRET")
+            or ""
+        )
+        if not secret:
+            raise RuntimeError(
+                "Secret de partage absent. Définissez CV_SHARE_SECRET "
+                "ou conservez CV_LICENSE_SECRET dans les variables Render."
+            )
+        return secret.encode("utf-8")
+
+    def _public_origin(self) -> str:
+        configured = os.getenv("CV_PUBLIC_BASE_URL", "").strip().rstrip("/")
+        if configured:
+            return configured
+
+        forwarded_proto = self.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
+        proto = forwarded_proto or "https"
+        host = (
+            self.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
+            or self.headers.get("Host", "sirapro.onrender.com")
+        )
+        return f"{proto}://{host}"
+
+    @staticmethod
+    def _b64url_encode(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _b64url_decode(value: str) -> bytes:
+        padding = "=" * (-len(value) % 4)
+        return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+    def _make_share_token(self, score: int, ref: str, channel: str) -> str:
+        payload = {
+            "v": 1,
+            "score": int(score),
+            "ref": ref,
+            "channel": channel,
+            "created": int(time.time()),
+        }
+        raw = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+        signature = hmac.new(
+            self._share_secret(),
+            raw,
+            hashlib.sha256
+        ).digest()
+
+        return f"{self._b64url_encode(raw)}.{self._b64url_encode(signature)}"
+
+    def _decode_share_token(self, token: str):
+        try:
+            body_b64, sig_b64 = token.split(".", 1)
+            raw = self._b64url_decode(body_b64)
+            supplied = self._b64url_decode(sig_b64)
+
+            expected = hmac.new(
+                self._share_secret(),
+                raw,
+                hashlib.sha256
+            ).digest()
+
+            if not hmac.compare_digest(expected, supplied):
+                return None
+
+            payload = json.loads(raw.decode("utf-8"))
+            score = int(payload.get("score", -1))
+            if score < 0 or score > 100:
+                return None
+
+            return payload
+        except Exception:
+            return None
+
+    def _handle_share_link(self) -> None:
+        try:
+            data = self._read_json()
+
+            score = int(round(float(data.get("score", -1))))
+            if score < 0 or score > 100:
+                raise ValueError("Score ATS invalide")
+
+            ref = re.sub(
+                r"[^A-Za-z0-9_-]",
+                "",
+                str(data.get("ref", "")).strip()
+            )[:24]
+
+            if not ref:
+                ref = "SIRAPRO"
+
+            channel = re.sub(
+                r"[^A-Za-z0-9_-]",
+                "",
+                str(data.get("channel", "facebook")).strip().lower()
+            )[:24] or "facebook"
+
+            token = self._make_share_token(score, ref, channel)
+            share_url = f"{self._public_origin()}/s/{token}"
+
+            self._send_json({
+                "status": "ok",
+                "share_url": share_url
+            })
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, 400)
+        except RuntimeError as exc:
+            self._send_json({"error": str(exc)}, 503)
+        except Exception as exc:
+            print(f"[SHARE] Erreur création lien : {exc}", flush=True)
+            self._send_json({"error": "Impossible de créer le lien de partage"}, 500)
+
+    def _share_copy(self, score: int):
+        if score >= 85:
+            level = "Excellent score"
+            icon = "🏆"
+            title = f"{score}/100 ATS — Peux-tu battre mon score ?"
+            description = (
+                f"J'ai obtenu {score}/100 au test ATS SiraPro. "
+                "Peux-tu battre mon score ? Teste gratuitement ton CV."
+            )
+        elif score >= 70:
+            level = "Bon score"
+            icon = "🟢"
+            title = f"{score}/100 au test ATS SiraPro"
+            description = (
+                f"Mon CV obtient {score}/100 au test ATS SiraPro. "
+                "Et le tien ? Teste gratuitement ton CV."
+            )
+        elif score >= 50:
+            level = "Score moyen"
+            icon = "🟠"
+            title = f"Test ATS SiraPro : score {score}/100"
+            description = (
+                "Je viens de tester mon CV avec SiraPro. "
+                "Découvre gratuitement ton propre score ATS."
+            )
+        else:
+            level = "À améliorer"
+            icon = "🔍"
+            title = "J'ai testé mon CV avec SiraPro"
+            description = (
+                "Le test ATS SiraPro m'a montré les points à améliorer. "
+                "Teste gratuitement ton propre CV."
+            )
+
+        return icon, level, title, description
+
+    def _handle_share_page(self, token: str) -> None:
+        payload = self._decode_share_token(token)
+        if not payload:
+            self.send_error(404, "Lien de partage invalide")
+            return
+
+        score = int(payload["score"])
+        ref = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("ref", "SIRAPRO")))[:24]
+        channel = re.sub(
+            r"[^A-Za-z0-9_-]",
+            "",
+            str(payload.get("channel", "facebook")).lower()
+        )[:24] or "facebook"
+
+        icon, level, title, description = self._share_copy(score)
+        origin = self._public_origin()
+        share_url = f"{origin}/s/{token}"
+        image_url = f"{origin}/share-card/{token}.png"
+
+        destination_query = urlencode({
+            "utm_source": channel,
+            "utm_medium": "organic_share",
+            "utm_campaign": "ats_score",
+            "ref": ref,
+        })
+        destination = f"/?{destination_query}"
+
+        safe_title = html_lib.escape(title, quote=True)
+        safe_description = html_lib.escape(description, quote=True)
+        safe_share_url = html_lib.escape(share_url, quote=True)
+        safe_image_url = html_lib.escape(image_url, quote=True)
+        safe_destination = json.dumps(destination)
+
+        page = f"""<!doctype html>
+<html lang="fr-DZ" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <title>{safe_title} | SiraPro</title>
+  <meta name="description" content="{safe_description}">
+  <meta name="robots" content="noindex,follow">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="SiraPro">
+  <meta property="og:url" content="{safe_share_url}">
+  <meta property="og:title" content="{safe_title}">
+  <meta property="og:description" content="{safe_description}">
+  <meta property="og:image" content="{safe_image_url}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:locale" content="fr_DZ">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{safe_title}">
+  <meta name="twitter:description" content="{safe_description}">
+  <meta name="twitter:image" content="{safe_image_url}">
+
+  <style>
+    *{{box-sizing:border-box}}
+    body{{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(135deg,#effaf6,#f5f0ff);color:#0f172a;min-height:100vh;display:grid;place-items:center;padding:24px}}
+    .card{{width:min(680px,100%);background:#fff;border:1px solid #e2e8f0;border-radius:24px;padding:34px;text-align:center;box-shadow:0 20px 60px rgba(15,23,42,.12)}}
+    .brand{{font-size:28px;font-weight:900;color:#1e745a}}
+    .badge{{display:inline-block;margin:18px 0 8px;padding:7px 12px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-weight:800}}
+    .score{{font-size:clamp(58px,12vw,92px);font-weight:900;color:#7c3aed;line-height:1;margin:12px 0}}
+    h1{{font-size:28px;margin:12px 0}}
+    p{{color:#475569;line-height:1.65}}
+    a{{display:inline-block;margin-top:15px;padding:14px 22px;border-radius:12px;background:linear-gradient(90deg,#1e745a,#7c3aed);color:#fff;text-decoration:none;font-weight:900}}
+    small{{display:block;margin-top:18px;color:#94a3b8}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">SiraPro 🇩🇿</div>
+    <div class="badge">{html_lib.escape(icon)} {html_lib.escape(level)}</div>
+    <div class="score">{score}/100</div>
+    <h1>{html_lib.escape(title)}</h1>
+    <p>{html_lib.escape(description)}</p>
+    <a href="{html_lib.escape(destination, quote=True)}">🔍 Tester gratuitement mon CV</a>
+    <small>Redirection vers SiraPro…</small>
+  </main>
+
+  <script>
+    setTimeout(function () {{
+      window.location.replace({safe_destination});
+    }}, 1400);
+  </script>
+</body>
+</html>"""
+
+        raw = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _handle_share_card(self, token: str) -> None:
+        payload = self._decode_share_token(token)
+        if not payload:
+            self.send_error(404, "Carte invalide")
+            return
+
+        score = int(payload["score"])
+        icon, level, title, description = self._share_copy(score)
+
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+
+            width, height = 1200, 630
+            image = Image.new("RGB", (width, height), "#F7FBFA")
+            draw = ImageDraw.Draw(image)
+
+            # Subtle brand panels
+            draw.rounded_rectangle((55, 50, 1145, 580), radius=34, fill="#FFFFFF", outline="#DDE8E4", width=3)
+            draw.rounded_rectangle((75, 70, 420, 150), radius=22, fill="#E8F6F1")
+            draw.rounded_rectangle((780, 70, 1125, 150), radius=22, fill="#F0EAFE")
+
+            def load_font(size, bold=False):
+                candidates = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+                ]
+                for candidate in candidates:
+                    try:
+                        return ImageFont.truetype(candidate, size=size)
+                    except Exception:
+                        pass
+                return ImageFont.load_default()
+
+            font_brand = load_font(42, True)
+            font_small = load_font(29, True)
+            font_score = load_font(112, True)
+            font_title = load_font(44, True)
+            font_cta = load_font(30, True)
+
+            draw.text((100, 91), "SiraPro", font=font_brand, fill="#1E745A")
+            draw.text((815, 95), "CV ATS Algérie", font=font_small, fill="#7C3AED")
+
+            # score centered
+            score_text = f"{score}/100"
+            bbox = draw.textbbox((0, 0), score_text, font=font_score)
+            x = (width - (bbox[2] - bbox[0])) / 2
+            draw.text((x, 190), score_text, font=font_score, fill="#7C3AED")
+
+            title_text = title
+            if len(title_text) > 42:
+                title_text = title_text[:39] + "…"
+            bbox = draw.textbbox((0, 0), title_text, font=font_title)
+            x = max(90, (width - (bbox[2] - bbox[0])) / 2)
+            draw.text((x, 350), title_text, font=font_title, fill="#0F172A")
+
+            cta = "Teste gratuitement ton CV sur SiraPro"
+            bbox = draw.textbbox((0, 0), cta, font=font_cta)
+            x = (width - (bbox[2] - bbox[0])) / 2
+            draw.text((x, 455), cta, font=font_cta, fill="#1E745A")
+
+            draw.text((423, 520), "sirapro.onrender.com", font=font_small, fill="#475569")
+
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+            raw = buffer.getvalue()
+
+        except Exception as exc:
+            print(f"[SHARE] Carte dynamique indisponible : {exc}", flush=True)
+            fallback = STATIC / "sirapro-share.png"
+            if not fallback.exists():
+                self.send_error(500, "Image de partage indisponible")
+                return
+            raw = fallback.read_bytes()
+
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
