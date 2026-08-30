@@ -513,24 +513,72 @@
   function shareFacebook() {
     if (currentATSScore === null) return;
 
-    var url = buildShareURL("facebook");
-
-    /*
-      Facebook's web sharer reliably accepts the destination URL.
-      The title/description/image displayed by Facebook come from
-      the Open Graph metadata of the shared SiraPro page.
-    */
-    var facebookURL =
-      "https://www.facebook.com/sharer/sharer.php?u=" +
-      encodeURIComponent(url);
-
-    window.open(
-      facebookURL,
+    var popup = window.open(
+      "about:blank",
       "siraproFacebookShare",
       "width=720,height=620,noopener,noreferrer"
     );
 
-    trackShare("facebook");
+    // Facebook ne permet pas de préremplir librement le texte personnel.
+    // On copie donc le message pour que l'utilisateur puisse le coller,
+    // tandis que la carte Facebook reçoit le score depuis /s/<token>.
+    try {
+      navigator.clipboard.writeText(buildShareText());
+    } catch (e) {}
+
+    fetch("/api/share-link", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        score: currentATSScore,
+        ref: getReferralCode(),
+        channel: "facebook"
+      })
+    })
+    .then(function (r) {
+      return r.json().then(function (j) {
+        return { ok: r.ok, j: j };
+      });
+    })
+    .then(function (res) {
+      if (!res.ok || !res.j.share_url) {
+        throw new Error(res.j.error || "Lien Facebook indisponible");
+      }
+
+      var facebookURL =
+        "https://www.facebook.com/sharer/sharer.php?u=" +
+        encodeURIComponent(res.j.share_url);
+
+      if (popup) {
+        popup.location.href = facebookURL;
+      } else {
+        window.location.href = facebookURL;
+      }
+
+      setFeedback(
+        "✅ Facebook reçoit maintenant votre score. Le texte est aussi copié : collez-le si vous voulez l'ajouter au-dessus de la carte."
+      );
+
+      trackShare("facebook");
+    })
+    .catch(function () {
+      var fallback = buildShareURL("facebook");
+      var facebookURL =
+        "https://www.facebook.com/sharer/sharer.php?u=" +
+        encodeURIComponent(fallback);
+
+      if (popup) {
+        popup.location.href = facebookURL;
+      } else {
+        window.location.href = facebookURL;
+      }
+
+      setFeedback(
+        "Partage Facebook ouvert. Le serveur n'a pas pu créer la carte de score dynamique."
+      );
+    });
   }
 
   async function copyShareLink() {
