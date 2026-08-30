@@ -356,6 +356,9 @@
     result.innerHTML = "<p>⏳ Analyse en cours…</p>";
     var viralPanel = document.getElementById("viralSharePanel");
     if (viralPanel) viralPanel.hidden = true;
+
+    var storyPreview = document.getElementById("storyPreviewPanel");
+    if (storyPreview) storyPreview.hidden = true;
     var fd = new FormData();
     fd.append("file", file, file.name);
     fd.append("kind", (file.name.split(".").pop() || "").toLowerCase());
@@ -731,7 +734,22 @@
     if (shareBtn) shareBtn.addEventListener("click", shareScore);
     if (waBtn) waBtn.addEventListener("click", shareWhatsApp);
     if (fbBtn) fbBtn.addEventListener("click", shareFacebook);
+
+    // STORY-ATS: branchement du bouton Story
+    if (storyBtn) {
+      storyBtn.addEventListener("click", function () {
+        createStoryCard();
+      });
+    }
+
     if (copyBtn) copyBtn.addEventListener("click", copyShareLink);
+
+    // STORY-ATS: copie du lien depuis le panneau d'aperçu
+    if (copyStoryBtn) {
+      copyStoryBtn.addEventListener("click", function () {
+        copyStoryLink();
+      });
+    }
 
     captureIncomingReferral();
   });
